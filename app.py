@@ -16,6 +16,9 @@ import argparse
 import lxml.html
 import requests
 from lxml.cssselect import CSSSelector
+from transformers import pipeline
+
+
 
 YOUTUBE_VIDEO_URL = 'https://www.youtube.com/watch?v={youtube_id}'
 YOUTUBE_COMMENTS_AJAX_URL_OLD = 'https://www.youtube.com/comment_ajax'
@@ -277,6 +280,8 @@ st.header("Entrez le lien de votre vidéo.")
 
 youtube_link = st.text_input("Votre lien Youtube")
 
+classifier = pipeline('sentiment-analysis')
+
 if youtube_link:
     st.video(youtube_link)
 
@@ -284,7 +289,19 @@ if youtube_link:
     df = pd.DataFrame(data)
 
     df["answer"] = 0
+    for i in range(df.shape[0]):
+        df["answer"][i] = len(df.cid[i].split("."))-1
     data_clean = df[df.answer == 0][["text", "author"]].reset_index()
+    data_clean["sentiment"] = 0
+    for i in range(data_clean.shape[0]):
+        if len(data_clean.text[i]) > 512:
+            pass
+        else:
+            if classifier(data_clean.text[i])[0]["label"] == 'POSITIVE':
+                data_clean.sentiment[i] = 'POSITIVE'
+            else:
+                data_clean.sentiment[i] = 'NEGATIVE'
+
     data_clean.text = data_clean.text.apply(lambda x : nettoyage(x))
 
     unique_words = []
@@ -299,10 +316,22 @@ if youtube_link:
     for i in range(data_clean.shape[0]):
         for word in data_clean["text"][i]:
             unique_words_dict[word] += 1
-        
+
+
+    st.header("Quels sont les mots qui ressortent le plus des commentaires ?")
+
     wordcloud = WordCloud(background_color="white", max_words=50).generate_from_frequencies(unique_words_dict)
         
     plt.figure(figsize=(20,10))
     plt.imshow(wordcloud)
+    plt.show()
+    st.pyplot()
+
+    st.header("Quel est le sentiment général des commentaires ?")
+
+    data_clean = data_clean[data_clean.sentiment != 0]
+    dd = data_clean.sentiment.value_counts().to_dict()
+
+    plt.bar(dd.keys(), dd.values())
     plt.show()
     st.pyplot()
