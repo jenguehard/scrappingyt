@@ -3,6 +3,8 @@ from __future__ import print_function
 import io
 import json
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="-1"    
+import tensorflow as tf
 import sys
 import time
 import streamlit as st
@@ -11,8 +13,6 @@ import re
 from wordcloud import WordCloud, STOPWORDS 
 import matplotlib.pyplot as plt 
 import pandas as pd 
-import tensorflow as tf
-
 import argparse
 import lxml.html
 import requests
