@@ -11,6 +11,7 @@ import re
 from wordcloud import WordCloud, STOPWORDS 
 import matplotlib.pyplot as plt 
 import pandas as pd 
+import tensorflow as tf
 
 import argparse
 import lxml.html
