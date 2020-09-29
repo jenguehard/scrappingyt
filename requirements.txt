@@ -1,0 +1,9 @@
+stop_words==2018.7.23
+lxml==4.5.2
+nltk==3.5
+wordcloud==1.8.0
+requests==2.24.0
+pandas==1.0.5
+streamlit==0.66.0
+Unidecode==1.1.1
+matplotlib==3.2.2
