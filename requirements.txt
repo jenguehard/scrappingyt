@@ -1,13 +1,13 @@
+tensorflow==2.3.1
+tensorflow_cpu==2.3.1
 nltk==3.5
 stop_words==2018.7.23
 lxml==4.5.2
 Unidecode==1.1.1
 pandas==1.0.5
 matplotlib==3.2.2
-tensorflow_cpu==2.3.1
 transformers==3.3.0
 requests==2.24.0
 streamlit==0.66.0
 wordcloud==1.8.0
-tensorflow==2.3.1
 cssselect==1.1.0
