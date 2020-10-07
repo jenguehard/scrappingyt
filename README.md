@@ -6,7 +6,11 @@ This project allows you to get an analysis of the comments of a Youtube video.
 
 Use python 3.6 version
 
-In order to start the Streamlit application on local, please install the librairies inside the ```requirements.txt``` file and then launch the application on the terminal with the following command :
+In order to start the Streamlit application on local, please install the librairies inside the ```requirements.txt``` file.
+
+Please create a Youtube API-Key with this [Google guide](https://developers.google.com/youtube/v3/getting-started) and put it into a ```config.py``` file that you need to create.
+
+Launch the application on the terminal with the following command :
 
 ```streamlit run app.py```
 
