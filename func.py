@@ -18,9 +18,7 @@ import lxml.html
 import requests
 from lxml.cssselect import CSSSelector
 from transformers import pipeline
-from langdetect import detect
 import config
-# from func import main, nettoyage, topic_modeling, text_clustering, mysql_connect, insert_user, insert_comment, insert_video, get_data
 from mysql.connector import MySQLConnection, Error
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
@@ -29,18 +27,11 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import homogeneity_score, silhouette_score
 
 
-# API SETUP
-
-api_key= config.api_key
-youtube = build('youtube', 'v3', developerKey=api_key)
-
-
 YOUTUBE_VIDEO_URL = 'https://www.youtube.com/watch?v={youtube_id}'
 YOUTUBE_COMMENTS_AJAX_URL_OLD = 'https://www.youtube.com/comment_ajax'
 YOUTUBE_COMMENTS_AJAX_URL_NEW = 'https://www.youtube.com/comment_service_ajax'
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36'
-
 
 def find_value(html, key, num_chars=2, separator='"'):
     pos_begin = html.find(key) + len(key) + num_chars
@@ -245,7 +236,7 @@ def main(link):
             if not os.path.exists(outdir):
                 os.makedirs(outdir)
 
-        st.header('Downloading Youtube comments for video !')
+        st.write('Downloading Youtube comments for video !')
         count = 0
         sys.stdout.write('Downloaded %d comment(s)\r' % count)
         sys.stdout.flush()
@@ -265,14 +256,14 @@ def main(link):
 
 ##############################################################################
 
-def nettoyage(texte, language):
+def nettoyage(texte):
     tex=[]
     # Construction de la liste de stop words
     import stop_words
-    sw_1=stop_words.get_stop_words(language)
+    sw_1=stop_words.get_stop_words('en')
     from nltk.corpus import stopwords
-    sw_nltk = set(stopwords.words(dict_lang[language]))
-    sw=list(set(sw_1+list(sw_nltk)))+[str(i) for i in range(100)]+["http", "https", "www"]
+    sw_nltk = set(stopwords.words('english'))
+    sw=list(set(sw_1+list(sw_nltk)))+[str(i) for i in range(100)]
    
     texte=texte.lower()
    
@@ -284,31 +275,6 @@ def nettoyage(texte, language):
         else:
             tex.append(elem)
     return ' '.join(tex)
-
-##############################################################################
-
-def get_dictionnary_of_unique_words(data):
-    data["text_clean"] = data["text_clean"].apply(lambda x : x.split(" "))
-    unique_words = []
-
-    for i in range(data.shape[0]):
-        split_words = data["text_clean"][i]
-        unique_words = set(unique_words).union(set(split_words))
-    
-    unique_words_dict = dict.fromkeys(unique_words, 0)
-        
-    for i in range(data.shape[0]):
-        for word in data["text_clean"][i]:
-            unique_words_dict[word] += 1
-    sorted_unique_words_dict = {k: v for k, v in sorted(unique_words_dict.items(), key=lambda item: item[1], reverse = True)}
-    return unique_words_dict, sorted_unique_words_dict
-
-def get_wordcloud(data_dict):
-    wordcloud = WordCloud(background_color="white", max_words=50).generate_from_frequencies(data_dict)
-    plt.figure(figsize=(20,10))
-    plt.imshow(wordcloud)
-    plt.show()
-    st.pyplot()
 
 ##############################################################################
 
@@ -376,6 +342,31 @@ def text_clustering(data):
 
     return cls, features
 
+# ##############################################################################
+
+def get_dictionnary_of_unique_words(data):
+    data["text_clean"] = data["text_clean"].apply(lambda x : x.split(" "))
+    unique_words = []
+
+    for i in range(data.shape[0]):
+        split_words = data["text_clean"][i]
+        unique_words = set(unique_words).union(set(split_words))
+    
+    unique_words_dict = dict.fromkeys(unique_words, 0)
+        
+    for i in range(data.shape[0]):
+        for word in data["text_clean"][i]:
+            unique_words_dict[word] += 1
+    sorted_unique_words_dict = {k: v for k, v in sorted(unique_words_dict.items(), key=lambda item: item[1], reverse = True)}
+    return unique_words_dict, sorted_unique_words_dict
+
+def get_wordcloud(data_dict):
+    wordcloud = WordCloud(background_color="white", max_words=50).generate_from_frequencies(data_dict)
+    plt.figure(figsize=(20,10))
+    plt.imshow(wordcloud)
+    plt.show()
+    st.pyplot()
+
 ##############################################################################
 
 # MySQL connection
@@ -391,6 +382,8 @@ def mysql_connect():
     )
 
     mycursor = mydb.cursor(buffered=True)
+
+    # Table creation
 
     mycursor.execute("""
     CREATE TABLE IF NOT EXISTS `videos`
@@ -435,6 +428,7 @@ def mysql_connect():
     return mydb, mycursor
 
 def insert_video(video_id, link, key_words):
+    mydb, mycursor = mysql_connect()
     query = "INSERT INTO videos(video_id, url, key_words) " \
             "VALUES(%s,%s,%s)"
     args = (video_id, link, key_words)
@@ -446,6 +440,7 @@ def insert_video(video_id, link, key_words):
         print(error)
 
 def insert_user(user_id, full_name):
+    mydb, mycursor = mysql_connect()
     query = "INSERT INTO users(user_id, full_name) " \
             "VALUES(%s,%s)"
     args = (user_id, str(full_name))
@@ -457,6 +452,7 @@ def insert_user(user_id, full_name):
         print(error)
 
 def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes):
+    mydb, mycursor = mysql_connect()
     query = """ INSERT INTO comments(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes) VALUES (%s,%s,%s,%s,%s,%s,%s)"""
     
     args = (comment_id, comment, user_id, video_id, comment_clean, sentiment, votes)
@@ -467,59 +463,30 @@ def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentim
     except Error as error:
         print(error)
 
+def get_user(author):
+    mydb, mycursor = mysql_connect()
+    query_user = """SELECT * from users WHERE full_name = %s"""
+    string_user  = str(author)
+    arg = (string_user,)
+
+    mycursor.execute(query_user, arg)
+
+    myresult_user = mycursor.fetchall()
+    user_id = myresult_user[0][0]
+    return user_id
+
 ##############################################################################
+
 def local_css(file_name):
     with open(file_name) as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
 
-dict_lang = {'hu':'hungarian',
- 'sw':'swedish',
- 'no':'norwegian',
- 'fi':'finnish',
- 'ar':'arabic',
- 'id':'indonesian',
- 'pt':'portuguese',
- 'tr':'turkish',
- 'sl':'slovene',
- 'es':'spanish',
- 'da':'danish',
- 'ne':'nepali',
- 'ro':'romanian',
- 'gr':'greek',
- 'nl':'dutch',
- 'de':'german',
- 'en':'english',
- 'ru':'russian',
- 'fr':'french',
- 'it':'italian'}
-
-mydb, mycursor = mysql_connect()
-
-if mydb.is_connected():
-   db_Info = mydb.get_server_info()
-   print("Connected to MySQL database... MySQL Server version on ",db_Info)
-
-local_css("style.css")
-
-st.title("Que pensent les utilisateurs de cette vidéo ?")
-
-st.header("Entrez le lien de votre vidéo.")
-
-youtube_link = st.text_input("Votre lien Youtube")
-
-if youtube_link:
-    st.video(youtube_link)
-
-    req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
-    res2 = req2.execute()
-
-    language = detect(res2["items"][0]["snippet"]["description"])
-    st.write("Le langage est le suivant " + str(language) + ".")
-
-    classifier = pipeline('sentiment-analysis')
 ##############################################################################
 
-    # Check if the data already exist on the database
+def get_data(youtube_link):
+
+    mydb, mycursor = mysql_connect()
+    classifier = pipeline('sentiment-analysis')
 
     query_vid = """SELECT EXISTS(SELECT * from videos WHERE url=%s)"""
     arg_vid = (youtube_link,)
@@ -580,21 +547,21 @@ if youtube_link:
                 else:
                     data_clean.sentiment[i] = 'NEGATIVE'
 
+        # Use the nettoyage function to remove stop words and lower text to create "text_clean" column.
+
+        data_clean["text_clean"] = data_clean.text.apply(lambda x : nettoyage(x))
+        
+        data_author = data_clean.author.unique()
+        st.write(data_author)
+
         try :
+            req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
+            res2 = req2.execute()
+
             key_words = " ".join(res2["items"][0]["snippet"]["tags"])
 
         except :
             key_words = "No tag"
-
-        # Use the nettoyage function to remove stop words and lower text to create "text_clean" column.
-        try :
-            data_clean["text_clean"] = data_clean.text.apply(lambda x : nettoyage(x, language))
-        
-        except :
-            data_clean["text_clean"] = data_clean.text.apply(lambda x : nettoyage(x, 'en'))
-            print("Language not found")
-
-        data_author = data_clean.author.unique()
 
         # Put the video url and key words on the table videos
 
@@ -618,7 +585,6 @@ if youtube_link:
             mycursor.execute(query, arg)
 
             result = mycursor.fetchall()
-
             if result[0][0] == 1:
                 continue
             else:
@@ -636,16 +602,19 @@ if youtube_link:
 
             id_comment = num_rows
 
-            query_user = """SELECT * from users WHERE full_name = %s"""
-            string_user  = str(data_clean.author[i])
+            # query_user = """SELECT * from users WHERE full_name = %s"""
+            # string_user  = str(data_clean.author[i])
+            # st.write(string_user)
+            # arg = (string_user,)
 
-            arg = (string_user,)
+            # mycursor.execute(query_user, arg)
 
-            mycursor.execute(query_user, arg)
-
-            myresult_user = mycursor.fetchall()
-            user_id = myresult_user[0][0]
+            # myresult_user = mycursor.fetchall()
+            # st.write(myresult_user)
+            # user_id = myresult_user[0][0]
             
+            user_id = get_user(data_clean.author[i])
+
             insert_comment(id_comment, str(data_clean.text[i]), user_id, video_id, data_clean.text_clean[i], data_clean.sentiment[i], data_clean.votes[i])
         
         query = """SELECT * from comments WHERE video_id = %s"""
@@ -655,144 +624,4 @@ if youtube_link:
         
         data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes'])
 
-    # Get video's description from Youtube API.
-    
-    st.header("Description de la vidéo :")
-    
-    req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
-    res2 = req2.execute()
-    st.write(res2["items"][0]["snippet"]["description"])
-
-    try:
-        key_words = " ".join(res2["items"][0]["snippet"]["tags"])
-    except :
-        key_words = "No tags"
-
-    # Creation of "label" based on sentiment analysis of comments.
-
-    data_clean["label"] =0
-    for i in range(data_clean.shape[0]):
-        if data_clean.sentiment[i] == "POSITIVE":
-            data_clean.label[i] = 1
-
-    # Create dictionnary of unique words and create wordcloud from it.
-
-    unique_words_dict, sorted_unique_words_dict = get_dictionnary_of_unique_words(data_clean)
-
-    data_clean["text_clean"] = data_clean["text_clean"].apply(lambda x : " ".join(x))
-
-    st.header("Quels sont les mots qui ressortent le plus des commentaires ?")
-
-    get_wordcloud(unique_words_dict)
-    
-    # Topic modeling on comments to check the main subjects.
-    try:
-        st.header("Quels sont les principaux sujets ?")
-
-        topic_modeling(data_clean)
-
-    except:
-        pass
-
-    # Text clustering on comments to check if vocabulary is really different between "POSITIVE" and "NEGATIVE" comments.
-    try:
-        model, feat = text_clustering(data_clean)
-
-        homo_score = homogeneity_score(data_clean.label, model.predict(feat))
-        st.write("Le score d'homogénéité est de " + str(homo_score) + ". Selon la documentation, le score varie entre 0 et 1 où 1 signifie un labelling parfaitement homogène.")
-        
-        sil_score = silhouette_score(feat, labels=model.predict(feat))
-        st.write("Le silhouette score est de " + str(sil_score) + ".La meilleure valeur est 1 et la pire valeur est -1. Les valeurs proches de 0 indiquent des clusters qui se chevauchent. Les valeurs négatives indiquent généralement qu'un échantillon a été attribué au mauvais cluster, car un cluster différent est plus similaire.")
-
-    except:
-        pass
-    # Count the number of "POSITIVE" and "NEGATIVE" comments.
-
-    st.header("Quel est le sentiment général des commentaires ?")
-
-    data_clean = data_clean[data_clean.sentiment != 0]
-    dd = data_clean.sentiment.value_counts().to_dict()
-
-    plt.bar(dd.keys(), dd.values())
-    st.pyplot()
-
-    # Get five most liked comments and their sentiment.
-
-    st.header("Quels sont les commentaires les plus 'likés' et leur sentiment ?")
-
-    data_clean.votes = data_clean.votes.astype("int")
-    best = data_clean.sort_values(by="votes", ascending = False).index.to_list()[:5]
-    most_liked_comments = {}
-    for i in best:
-        st.write(data_clean.text[i])
-        most_liked_comments[i] = data_clean.text[i]
-        if data_clean.sentiment[i] == "POSITIVE" :
-            st.markdown("**POSITIVE**")
-        else:
-            st.markdown("**NEGATIVE**")
-        st.write("-------------------")
-
-    # Get the five users that commented the most.
-
-    st.header("Quels sont les utilisateurs qui ont le plus commenté ?")
-
-    most_author = data_clean.groupby("user_id").count().sort_values(by="text", ascending = False).index.to_list()[:5]
-    most_comments = data_clean.groupby("user_id").count().sort_values(by="text", ascending = False)["sentiment"].to_list()[:5]
-    authors = []
-
-    for author in most_author:
-        query = """SELECT * from users WHERE user_id= %s"""
-        arg = (author,)
-        mycursor.execute(query, arg)
-        result = mycursor.fetchall()
-        authors.append(result[0][1])
-    
-    best_commenters = {}
-    for i in range(len(authors)):
-        commenters = {}
-        commenters["Author"] = authors[i]
-        commenters["Number"] = most_comments[i]
-        st.write("L'utilisateur " + str(authors[i]) + " a écrit " + str(most_comments[i]) + " commentaire(s).")
-        best_commenters[i] = commenters
-
-    # Create two wordclouds and topic modeling : one for positive comments, the other for negative comments.
-
-    data_pos = data_clean[data_clean.sentiment == "POSITIVE"].reset_index()
-    data_neg = data_clean[data_clean.sentiment == "NEGATIVE"].reset_index()
-
-    unique_words_dict_pos, sorted_unique_words_dict_pos = get_dictionnary_of_unique_words(data_pos)
-    unique_words_dict_neg, sorted_unique_words_dict_neg = get_dictionnary_of_unique_words(data_neg)
-
-
-    unique_words_dict_pos_only = {x:unique_words_dict_pos[x] for x in unique_words_dict_pos if x not in unique_words_dict_neg}
-    sorted_unique_words_dict_pos_only = {k: v for k, v in sorted(unique_words_dict_pos_only.items(), key=lambda item: item[1], reverse = True)}
-    unique_words_dict_neg_only = {x:unique_words_dict_neg[x] for x in unique_words_dict_neg if x not in unique_words_dict_pos}
-    sorted_unique_words_dict_neg_only = {k: v for k, v in sorted(unique_words_dict_neg_only.items(), key=lambda item: item[1], reverse = True)}
-
-
-    data_neg["text_clean"] = data_neg["text_clean"].apply(lambda x : " ".join(x))
-    data_pos["text_clean"] = data_pos["text_clean"].apply(lambda x : " ".join(x))
-
-    for word_dict, data in zip([unique_words_dict_pos_only, unique_words_dict_neg_only], [data_pos, data_neg]):        
-        if word_dict == unique_words_dict_pos_only:
-            st.header("Quels sont les mots qui ressortent le plus des commentaires positifs ?")
-        else :
-            st.header("Quels sont les mots qui ressortent le plus des commentaires négatifs ?")
-        get_wordcloud(word_dict)
-        st.header("Quels sont les principaux sujets ?")
-        topic_modeling(data)
-
-    if(mydb.is_connected()):
-        mycursor.close()
-        mydb.close()
-        print("MySQL connection is closed")
-
-
-    st.header("Récupérez les résultats au format JSON.")
-
-    dict_result = {"link":youtube_link, "description": res2["items"][0]["snippet"]["description"], "key_words" : key_words, "Homogeneity score": homo_score,"Silhouette score" : sil_score, "Most liked comments" : most_liked_comments, "Ratio POSITIVE/NEGATIVE": dd, "Authors" : best_commenters, "Top 30 words full": list(sorted_unique_words_dict.keys())[:30], "Top 30 words positive": list(sorted_unique_words_dict_pos_only.keys())[:30], "Top 30 words negative" : list(sorted_unique_words_dict_neg_only.keys())[:30]}
-
-    st.write()
-    if st.button("Téléchargez le rapport"):
-        with open("result.json", "w") as outfile:  
-            json.dump(dict_result, outfile) 
+    return data_clean
