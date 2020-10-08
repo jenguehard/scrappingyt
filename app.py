@@ -18,9 +18,14 @@ import lxml.html
 import requests
 from lxml.cssselect import CSSSelector
 from transformers import pipeline
-import config
+import config, func
 from mysql.connector import MySQLConnection, Error
 from googleapiclient.discovery import build
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.decomposition import NMF, LatentDirichletAllocation, PCA
+from sklearn.cluster import KMeans
+from sklearn.metrics import homogeneity_score, silhouette_score
+
 
 # API SETUP
 
@@ -237,7 +242,7 @@ def main(link):
             if not os.path.exists(outdir):
                 os.makedirs(outdir)
 
-        st.write('Downloading Youtube comments for video !')
+        st.header('Downloading Youtube comments for video !')
         count = 0
         sys.stdout.write('Downloaded %d comment(s)\r' % count)
         sys.stdout.flush()
@@ -264,7 +269,7 @@ def nettoyage(texte):
     sw_1=stop_words.get_stop_words('en')
     from nltk.corpus import stopwords
     sw_nltk = set(stopwords.words('english'))
-    sw=list(set(sw_1+list(sw_nltk)))+[str(i) for i in range(100)]
+    sw=list(set(sw_1+list(sw_nltk)))+[str(i) for i in range(100)]+["http", "https", "www"]
    
     texte=texte.lower()
    
@@ -276,6 +281,97 @@ def nettoyage(texte):
         else:
             tex.append(elem)
     return ' '.join(tex)
+
+##############################################################################
+
+def get_dictionnary_of_unique_words(data):
+    data["text_clean"] = data["text_clean"].apply(lambda x : x.split(" "))
+    unique_words = []
+
+    for i in range(data.shape[0]):
+        split_words = data["text_clean"][i]
+        unique_words = set(unique_words).union(set(split_words))
+    
+    unique_words_dict = dict.fromkeys(unique_words, 0)
+        
+    for i in range(data.shape[0]):
+        for word in data["text_clean"][i]:
+            unique_words_dict[word] += 1
+    sorted_unique_words_dict = {k: v for k, v in sorted(unique_words_dict.items(), key=lambda item: item[1], reverse = True)}
+    return unique_words_dict, sorted_unique_words_dict
+
+def get_wordcloud(data_dict):
+    wordcloud = WordCloud(background_color="white", max_words=50).generate_from_frequencies(data_dict)
+    plt.figure(figsize=(20,10))
+    plt.imshow(wordcloud)
+    plt.show()
+    st.pyplot()
+
+##############################################################################
+
+def topic_modeling(data):
+    n_topics = 5
+    random_state = 0
+    vec = TfidfVectorizer(max_features=5000, stop_words="english", max_df=0.95, min_df=2)
+    features = vec.fit_transform(data.text_clean)
+    cls = LatentDirichletAllocation(n_components=n_topics, random_state=random_state)
+    feature_names = vec.get_feature_names()
+    cls.fit(features)
+
+    # number of most influencing words to display per topic
+    n_top_words = 15
+
+    for i, topic_vec in enumerate(cls.components_):
+    # topic_vec.argsort() produces a new array
+    # in which word_index with the least score is the
+    # first array element and word_index with highest
+    # score is the last array element. Then using a
+    # fancy indexing [-1: -n_top_words-1:-1], we are
+    # slicing the array from its end in such a way that
+    # top `n_top_words` word_index with highest scores
+    # are returned in desceding order
+        final_list = []
+        final_list.append(str(i))
+        for fid in topic_vec.argsort()[-1:-n_top_words-1:-1]:
+            final_list.append(feature_names[fid])
+        st.write(" ".join(final_list))
+        st.write()
+
+##############################################################################
+
+# Text clustering
+
+def text_clustering(data):
+    random_state = 0
+    vec = TfidfVectorizer(stop_words="english")
+    vec.fit(data.text_clean.values)
+    features = vec.transform(data.text_clean.values)
+
+    cls = KMeans(n_clusters=2, random_state=random_state)
+    cls.fit(features)
+
+
+    # predict cluster labels for new dataset
+    cls.predict(features)
+
+    # to get cluster labels for the dataset used while
+    # training the model (used for models that does not
+    # support prediction on new dataset).
+    # cls.labels_ - not required here
+
+    # reduce the features to 2D
+    pca = PCA(n_components=2, random_state=random_state)
+    reduced_features = pca.fit_transform(features.toarray())
+
+    # reduce the cluster centers to 2D
+    reduced_cluster_centers = pca.transform(cls.cluster_centers_)
+
+    plt.scatter(reduced_features[:,0], reduced_features[:,1], c=cls.predict(features))
+    plt.scatter(reduced_cluster_centers[:, 0], reduced_cluster_centers[:,1], marker='x', s=150, c='b')
+    plt.show()
+    st.pyplot()
+
+    return cls, features
 
 ##############################################################################
 
@@ -374,6 +470,11 @@ FOREIGN KEY (video_id) REFERENCES videos(video_id)
 """)
 
 ##############################################################################
+def local_css(file_name):
+    with open(file_name) as f:
+        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+local_css("style.css")
 
 st.title("Que pensent les utilisateurs de cette vidéo ?")
 
@@ -434,9 +535,14 @@ if youtube_link:
         
         # Do sentiment analysis on each comment.
         
+        st.header("Processing...")
+        my_bar = st.progress(0)
+        count = 0
         data_clean["sentiment"] = 0
         for i in range(data_clean.shape[0]):
-            if len(data_clean.text[i]) > 512:
+            my_bar.progress(i/data_clean.shape[0])
+
+            if len(data_clean.text[i]) > 500:
                 pass
             else:
                 if classifier(data_clean.text[i])[0]["label"] == 'POSITIVE':
@@ -450,10 +556,14 @@ if youtube_link:
         
         data_author = data_clean.author.unique()
 
-        req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
-        res2 = req2.execute()
+        try :
+            req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
+            res2 = req2.execute()
 
-        key_words = " ".join(res2["items"][0]["snippet"]["tags"])
+            key_words = " ".join(res2["items"][0]["snippet"]["tags"])
+
+        except :
+            key_words = "No tag"
 
         # Put the video url and key words on the table videos
 
@@ -516,42 +626,55 @@ if youtube_link:
 
     # Get video's description from Youtube API.
     
-    req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
-    res2 = req2.execute()
-    st.write(res2["items"][0]["snippet"]["description"])
-
-    # Create dictionnary of unique words and create wordcloud from it.
-
-    unique_words = []
-
-    for i in range(data_clean.shape[0]):
-        split_words = data_clean["text_clean"][i].split(" ")
-        unique_words = set(unique_words).union(set(split_words))
-        
-    unique_words_dict = dict.fromkeys(unique_words, 0)
-    data_clean["text_clean"] = data_clean["text_clean"].apply(lambda x : x.split(" "))
-
-    for i in range(data_clean.shape[0]):
-        for word in data_clean["text_clean"][i]:
-            unique_words_dict[word] += 1
-
-    data_clean["text_clean"] = data_clean["text_clean"].apply(lambda x : " ".join(x))
-
     st.header("Description de la vidéo :")
     
     req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
     res2 = req2.execute()
     st.write(res2["items"][0]["snippet"]["description"])
 
+    try:
+        key_words = " ".join(res2["items"][0]["snippet"]["tags"])
+    except :
+        key_words = "No tags"
+
+    # Creation of "label" based on sentiment analysis of comments.
+
+    data_clean["label"] =0
+    for i in range(data_clean.shape[0]):
+        if data_clean.sentiment[i] == "POSITIVE":
+            data_clean.label[i] = 1
+
+    # Create dictionnary of unique words and create wordcloud from it.
+
+    unique_words_dict, sorted_unique_words_dict = get_dictionnary_of_unique_words(data_clean)
+
+    data_clean["text_clean"] = data_clean["text_clean"].apply(lambda x : " ".join(x))
 
     st.header("Quels sont les mots qui ressortent le plus des commentaires ?")
 
-    wordcloud = WordCloud(background_color="white", max_words=50).generate_from_frequencies(unique_words_dict)
-        
-    plt.figure(figsize=(20,10))
-    plt.imshow(wordcloud)
-    st.pyplot()
+    get_wordcloud(unique_words_dict)
+    
+    # Topic modeling on comments to check the main subjects.
+    try:
+        st.header("Quels sont les principaux sujets ?")
 
+        topic_modeling(data_clean)
+
+    except:
+        pass
+
+    # Text clustering on comments to check if vocabulary is really different between "POSITIVE" and "NEGATIVE" comments.
+    try:
+        model, feat = text_clustering(data_clean)
+
+        homo_score = homogeneity_score(data_clean.label, model.predict(feat))
+        st.write("Le score d'homogénéité est de " + str(homo_score) + ". Selon la documentation, le score varie entre 0 et 1 où 1 signifie un labelling parfaitement homogène.")
+        
+        sil_score = silhouette_score(feat, labels=model.predict(feat))
+        st.write("Le silhouette score est de " + str(sil_score) + ".La meilleure valeur est 1 et la pire valeur est -1. Les valeurs proches de 0 indiquent des clusters qui se chevauchent. Les valeurs négatives indiquent généralement qu'un échantillon a été attribué au mauvais cluster, car un cluster différent est plus similaire.")
+
+    except:
+        pass
     # Count the number of "POSITIVE" and "NEGATIVE" comments.
 
     st.header("Quel est le sentiment général des commentaires ?")
@@ -568,9 +691,10 @@ if youtube_link:
 
     data_clean.votes = data_clean.votes.astype("int")
     best = data_clean.sort_values(by="votes", ascending = False).index.to_list()[:5]
-
+    most_liked_comments = {}
     for i in best:
         st.write(data_clean.text[i])
+        most_liked_comments[i] = data_clean.text[i]
         if data_clean.sentiment[i] == "POSITIVE" :
             st.markdown("**POSITIVE**")
         else:
@@ -579,7 +703,7 @@ if youtube_link:
 
     # Get the five users that commented the most.
 
-    st.header("Quels sont les utilisateurs qui ont le plus commenter ?")
+    st.header("Quels sont les utilisateurs qui ont le plus commenté ?")
 
     most_author = data_clean.groupby("user_id").count().sort_values(by="text", ascending = False).index.to_list()[:5]
     most_comments = data_clean.groupby("user_id").count().sort_values(by="text", ascending = False)["sentiment"].to_list()[:5]
@@ -591,56 +715,53 @@ if youtube_link:
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
         authors.append(result[0][1])
-
+    
+    best_commenters = {}
     for i in range(len(authors)):
+        commenters = {}
+        commenters["Author"] = authors[i]
+        commenters["Number"] = most_comments[i]
         st.write("L'utilisateur " + str(authors[i]) + " a écrit " + str(most_comments[i]) + " commentaire(s).")
+        best_commenters[i] = commenters
 
-    # Create two wordclouds : one for positive comments, the other for negative comments.
+    # Create two wordclouds and topic modeling : one for positive comments, the other for negative comments.
 
     data_pos = data_clean[data_clean.sentiment == "POSITIVE"].reset_index()
-    data_pos["text_clean"] = data_pos["text_clean"].apply(lambda x : x.split(" "))
-    unique_words_pos = []
-
-    for i in range(data_pos.shape[0]):
-        split_words_pos = data_pos["text_clean"][i]
-        unique_words_pos = set(unique_words_pos).union(set(split_words_pos))
-
-    unique_words_dict_pos = dict.fromkeys(unique_words_pos, 0)
-
-    for i in range(data_pos.shape[0]):
-        for word in data_pos["text_clean"][i]:
-            unique_words_dict_pos[word] += 1
-
     data_neg = data_clean[data_clean.sentiment == "NEGATIVE"].reset_index()
-    data_neg["text_clean"] = data_neg["text_clean"].apply(lambda x : x.split(" "))
-    unique_words_neg = []
 
-    for i in range(data_neg.shape[0]):
-        split_words_neg = data_neg["text_clean"][i]
-        unique_words_neg = set(unique_words_neg).union(set(split_words_neg))
-    
-    unique_words_dict_neg = dict.fromkeys(unique_words_neg, 0)
-        
-    for i in range(data_neg.shape[0]):
-        for word in data_neg["text_clean"][i]:
-            unique_words_dict_neg[word] += 1
+    unique_words_dict_pos, sorted_unique_words_dict_pos = get_dictionnary_of_unique_words(data_pos)
+    unique_words_dict_neg, sorted_unique_words_dict_neg = get_dictionnary_of_unique_words(data_neg)
+
 
     unique_words_dict_pos_only = {x:unique_words_dict_pos[x] for x in unique_words_dict_pos if x not in unique_words_dict_neg}
+    sorted_unique_words_dict_pos_only = {k: v for k, v in sorted(unique_words_dict_pos_only.items(), key=lambda item: item[1], reverse = True)}
     unique_words_dict_neg_only = {x:unique_words_dict_neg[x] for x in unique_words_dict_neg if x not in unique_words_dict_pos}
+    sorted_unique_words_dict_neg_only = {k: v for k, v in sorted(unique_words_dict_neg_only.items(), key=lambda item: item[1], reverse = True)}
 
-    for word_dict in [unique_words_dict_pos_only, unique_words_dict_neg_only]:        
+
+    data_neg["text_clean"] = data_neg["text_clean"].apply(lambda x : " ".join(x))
+    data_pos["text_clean"] = data_pos["text_clean"].apply(lambda x : " ".join(x))
+
+    for word_dict, data in zip([unique_words_dict_pos_only, unique_words_dict_neg_only], [data_pos, data_neg]):        
         if word_dict == unique_words_dict_pos_only:
             st.header("Quels sont les mots qui ressortent le plus des commentaires positifs ?")
         else :
             st.header("Quels sont les mots qui ressortent le plus des commentaires négatifs ?")
-
-        wordcloud = WordCloud(background_color="white", max_words=50).generate_from_frequencies(word_dict)
-        plt.figure(figsize=(20,10))
-        plt.imshow(wordcloud)
-        plt.show()
-        st.pyplot()
+        get_wordcloud(word_dict)
+        st.header("Quels sont les principaux sujets ?")
+        topic_modeling(data)
 
     if(mydb.is_connected()):
         mycursor.close()
         mydb.close()
         print("MySQL connection is closed")
+
+
+    st.header("Récupérez les résultats au format JSON.")
+
+    dict_result = {"link":youtube_link, "description": res2["items"][0]["snippet"]["description"], "key_words" : key_words, "Homogeneity score": homo_score,"Silhouette score" : sil_score, "Most liked comments" : most_liked_comments, "Ratio POSITIVE/NEGATIVE": dd, "Authors" : best_commenters, "Top 30 words full": list(sorted_unique_words_dict.keys())[:30], "Top 30 words positive": list(sorted_unique_words_dict_pos_only.keys())[:30], "Top 30 words negative" : list(sorted_unique_words_dict_neg_only.keys())[:30]}
+
+    st.write()
+    if st.button("Téléchargez le rapport"):
+        with open("result.json", "w") as outfile:  
+            json.dump(dict_result, outfile) 
