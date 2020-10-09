@@ -24,4 +24,4 @@ In this project, my MySQL server is in localhost but this information can be cha
 
 The structure of the DB is the following : 
 
-![dbstructure](images/Database structure.png)
+![dbstructure](https://github.com/jenguehard/scrappingyt/blob/master/images/Database%20structure.png)
