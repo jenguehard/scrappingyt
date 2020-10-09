@@ -18,6 +18,7 @@ import lxml.html
 import requests
 from lxml.cssselect import CSSSelector
 from transformers import pipeline
+from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 from langdetect import detect
 import config
 # from func import main, nettoyage, topic_modeling, text_clustering, mysql_connect, insert_user, insert_comment, insert_video, get_data
@@ -424,6 +425,7 @@ def mysql_connect():
     comment_clean VARCHAR(512) NOT NULL ,
     sentiment     text NOT NULL,
     votes      int NOT NULL DEFAULT 0,
+    language      text NOT NULL,
 
     PRIMARY KEY (comment_id),
 
@@ -456,10 +458,10 @@ def insert_user(user_id, full_name):
     except Error as error:
         print(error)
 
-def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes):
-    query = """ INSERT INTO comments(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes) VALUES (%s,%s,%s,%s,%s,%s,%s)"""
+def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language):
+    query = """ INSERT INTO comments(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"""
     
-    args = (comment_id, comment, user_id, video_id, comment_clean, sentiment, votes)
+    args = (comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language)
     
     try:
         mycursor.execute(query, args)
@@ -509,14 +511,23 @@ youtube_link = st.text_input("Votre lien Youtube")
 
 if youtube_link:
     st.video(youtube_link)
-
-    req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
-    res2 = req2.execute()
-
-    language = detect(res2["items"][0]["snippet"]["description"])
+    try :
+        req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
+        res2 = req2.execute()
+        language = detect(res2["items"][0]["snippet"]["description"])
+    except:
+        language = "en"
+    
     st.write("Le langage est le suivant " + str(language) + ".")
 
-    classifier = pipeline('sentiment-analysis')
+    if language == "fr" :
+        tokenizer = AutoTokenizer.from_pretrained("tblard/tf-allocine")
+        model = TFAutoModelForSequenceClassification.from_pretrained("tblard/tf-allocine")
+        
+        classifier = pipeline('sentiment-analysis', model=model, tokenizer=tokenizer)
+    
+    else:
+        classifier = pipeline('sentiment-analysis')
 ##############################################################################
 
     # Check if the data already exist on the database
@@ -545,7 +556,7 @@ if youtube_link:
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
 
-        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes'])
+        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes', 'language'])
 
     # Otherwise retrieve all the information from the video and insert it in the database.
 
@@ -563,11 +574,19 @@ if youtube_link:
             df["answer"][i] = len(df.cid[i].split("."))-1
         data_clean = df[df.answer == 0][["text", "author", "votes"]].reset_index()
         
+        data_clean["language"] = 0 
+        for i in range(data_clean.shape[0]):
+            try :
+                data_clean["language"][i] = detect(str(data_clean.text[i]))
+            except:
+                data_clean["language"][i] = "unknown"
+
+        data_clean = data_clean[data_clean.language == language].reset_index()
+
         # Do sentiment analysis on each comment.
         
         st.header("Processing...")
         my_bar = st.progress(0)
-        count = 0
         data_clean["sentiment"] = 0
         for i in range(data_clean.shape[0]):
             my_bar.progress(i/data_clean.shape[0])
@@ -646,14 +665,14 @@ if youtube_link:
             myresult_user = mycursor.fetchall()
             user_id = myresult_user[0][0]
             
-            insert_comment(id_comment, str(data_clean.text[i]), user_id, video_id, data_clean.text_clean[i], data_clean.sentiment[i], data_clean.votes[i])
+            insert_comment(id_comment, str(data_clean.text[i]), user_id, video_id, data_clean.text_clean[i], data_clean.sentiment[i], data_clean.votes[i], data_clean.language[i])
         
         query = """SELECT * from comments WHERE video_id = %s"""
         arg = (video_id,)
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
         
-        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes'])
+        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes', 'language'])
 
     # Get video's description from Youtube API.
     
