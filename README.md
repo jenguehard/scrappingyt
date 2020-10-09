@@ -21,3 +21,7 @@ Copy and paste your Youtube Link inside the dedicated file and press Enter. Shor
 This project requires a MySQL server to store the data and be able to retrieve it quickly based on the link of the video. As the analysis can take time this allows for quick analysis.
 
 In this project, my MySQL server is in localhost but this information can be changed depending on your requirements.
+
+The structure of the DB is the following : 
+
+![dbstructure](images/Database structure.png)
