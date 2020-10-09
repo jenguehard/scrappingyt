@@ -246,18 +246,20 @@ def main(link):
             if not os.path.exists(outdir):
                 os.makedirs(outdir)
 
-        st.header('Downloading Youtube comments for video !')
+        st.header('Téléchargement des commentaires de la vidéo !')
         count = 0
         sys.stdout.write('Downloaded %d comment(s)\r' % count)
         sys.stdout.flush()
         start_time = time.time()
-        for comment in download_comments(youtube_id):
-            output.append(comment)
-            count += 1
-            sys.stdout.write('Downloaded %d comment(s)\r' % count)
-            sys.stdout.flush()
+        with st.spinner('En cours de téléchargement....'):
+            for comment in download_comments(youtube_id):
+                output.append(comment)
+                count += 1
+                sys.stdout.write('Downloaded %d comment(s)\r' % count)
+                sys.stdout.flush()
 
-        st.write(('\n[{:.2f} secondes] Terminé !'.format(time.time() - start_time)))
+        # st.write(('\n[{:.2f} secondes] Terminé !'.format(time.time() - start_time)))
+        st.success("Téléchargement terminé !")
         return output
 
     except Exception as e:
