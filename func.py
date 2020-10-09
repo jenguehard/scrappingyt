@@ -19,6 +19,7 @@ import requests
 from lxml.cssselect import CSSSelector
 from transformers import pipeline
 import config
+from langdetect import detect
 from mysql.connector import MySQLConnection, Error
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
@@ -236,7 +237,7 @@ def main(link):
             if not os.path.exists(outdir):
                 os.makedirs(outdir)
 
-        st.write('Downloading Youtube comments for video !')
+        st.header('Downloading Youtube comments for video !')
         count = 0
         sys.stdout.write('Downloaded %d comment(s)\r' % count)
         sys.stdout.flush()
@@ -256,14 +257,35 @@ def main(link):
 
 ##############################################################################
 
-def nettoyage(texte):
+def nettoyage(texte, language):
+    dict_lang = {'hu':'hungarian',
+ 'sw':'swedish',
+ 'no':'norwegian',
+ 'fi':'finnish',
+ 'ar':'arabic',
+ 'id':'indonesian',
+ 'pt':'portuguese',
+ 'tr':'turkish',
+ 'sl':'slovene',
+ 'es':'spanish',
+ 'da':'danish',
+ 'ne':'nepali',
+ 'ro':'romanian',
+ 'gr':'greek',
+ 'nl':'dutch',
+ 'de':'german',
+ 'en':'english',
+ 'ru':'russian',
+ 'fr':'french',
+ 'it':'italian'}
+    
     tex=[]
     # Construction de la liste de stop words
     import stop_words
-    sw_1=stop_words.get_stop_words('en')
+    sw_1=stop_words.get_stop_words(language)
     from nltk.corpus import stopwords
-    sw_nltk = set(stopwords.words('english'))
-    sw=list(set(sw_1+list(sw_nltk)))+[str(i) for i in range(100)]
+    sw_nltk = set(stopwords.words(dict_lang[language]))
+    sw=list(set(sw_1+list(sw_nltk)))+[str(i) for i in range(100)]+["http", "https", "www"]
    
     texte=texte.lower()
    
@@ -417,6 +439,7 @@ def mysql_connect():
     comment_clean VARCHAR(512) NOT NULL ,
     sentiment     text NOT NULL,
     votes      int NOT NULL DEFAULT 0,
+    language      text NOT NULL,
 
     PRIMARY KEY (comment_id),
 
@@ -436,6 +459,8 @@ def insert_video(video_id, link, key_words):
     try:
         mycursor.execute(query, args)
         mydb.commit()
+        mycursor.close()
+        mydb.close()
     except Error as error:
         print(error)
 
@@ -448,31 +473,41 @@ def insert_user(user_id, full_name):
     try:
         mycursor.execute(query, args)
         mydb.commit()
+        mycursor.close()
+        mydb.close()
     except Error as error:
         print(error)
 
-def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes):
+def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language):
     mydb, mycursor = mysql_connect()
-    query = """ INSERT INTO comments(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes) VALUES (%s,%s,%s,%s,%s,%s,%s)"""
+    query = """ INSERT INTO comments(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"""
     
-    args = (comment_id, comment, user_id, video_id, comment_clean, sentiment, votes)
+    args = (comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language)
     
     try:
         mycursor.execute(query, args)
         mydb.commit()
+        mycursor.close()
+        mydb.close()
     except Error as error:
         print(error)
 
 def get_user(author):
     mydb, mycursor = mysql_connect()
-    query_user = """SELECT * from users WHERE full_name = %s"""
-    string_user  = str(author)
-    arg = (string_user,)
+    query = """SELECT * from users WHERE full_name = %s;"""
+    string  = str(author)
+    arg = (string,)
 
-    mycursor.execute(query_user, arg)
+    try:
+        mycursor.execute(query, arg)
+        mydb.commit()
+        mycursor.close()
+        mydb.close()
+    except Error as error:
+        st.write(error)
 
-    myresult_user = mycursor.fetchall()
-    user_id = myresult_user[0][0]
+    myresult = mycursor.fetchall()
+    user_id = myresult[0][0]
     return user_id
 
 ##############################################################################
@@ -485,8 +520,28 @@ def local_css(file_name):
 
 def get_data(youtube_link):
 
+    api_key= config.api_key
+    youtube = build('youtube', 'v3', developerKey=api_key)
+
+    try :
+        req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
+        res2 = req2.execute()
+        language = detect(res2["items"][0]["snippet"]["description"])
+    except:
+        language = "en"
+    
+    st.write("Le langage est le suivant " + str(language) + ".")
+
+    if language == "fr" :
+        tokenizer = AutoTokenizer.from_pretrained("tblard/tf-allocine")
+        model = TFAutoModelForSequenceClassification.from_pretrained("tblard/tf-allocine")
+        
+        classifier = pipeline('sentiment-analysis', model=model, tokenizer=tokenizer)
+    
+    else:
+        classifier = pipeline('sentiment-analysis')
+
     mydb, mycursor = mysql_connect()
-    classifier = pipeline('sentiment-analysis')
 
     query_vid = """SELECT EXISTS(SELECT * from videos WHERE url=%s)"""
     arg_vid = (youtube_link,)
@@ -530,11 +585,19 @@ def get_data(youtube_link):
             df["answer"][i] = len(df.cid[i].split("."))-1
         data_clean = df[df.answer == 0][["text", "author", "votes"]].reset_index()
         
+        data_clean["language"] = 0 
+        for i in range(data_clean.shape[0]):
+            try :
+                data_clean["language"][i] = detect(str(data_clean.text[i]))
+            except:
+                data_clean["language"][i] = "unknown"
+
+        data_clean = data_clean[data_clean.language == language].reset_index()
+
         # Do sentiment analysis on each comment.
         
         st.header("Processing...")
         my_bar = st.progress(0)
-        count = 0
         data_clean["sentiment"] = 0
         for i in range(data_clean.shape[0]):
             my_bar.progress(i/data_clean.shape[0])
@@ -549,10 +612,10 @@ def get_data(youtube_link):
 
         # Use the nettoyage function to remove stop words and lower text to create "text_clean" column.
 
-        data_clean["text_clean"] = data_clean.text.apply(lambda x : nettoyage(x))
+        data_clean["text_clean"] = data_clean.text.apply(lambda x : nettoyage(x, language))
         
         data_author = data_clean.author.unique()
-        st.write(data_author)
+        st.write(data_clean)
 
         try :
             req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
@@ -595,6 +658,8 @@ def get_data(youtube_link):
         result = mycursor.fetchall()
         num_rows = result[0][0]
 
+        st.write(data_clean.author)
+
         for i in range(data_clean.shape[0]):
             ### Get user id
 
@@ -602,26 +667,24 @@ def get_data(youtube_link):
 
             id_comment = num_rows
 
-            # query_user = """SELECT * from users WHERE full_name = %s"""
-            # string_user  = str(data_clean.author[i])
-            # st.write(string_user)
-            # arg = (string_user,)
+            # query = """SELECT * FROM users WHERE full_name = %s;"""
+            # arg = (data_clean.author[i],)
 
-            # mycursor.execute(query_user, arg)
+            # mycursor.execute(query, arg)
 
-            # myresult_user = mycursor.fetchall()
-            # st.write(myresult_user)
-            # user_id = myresult_user[0][0]
-            
+            # myresult = mycursor.fetchone()
+            # st.write(myresult)
+            # user_id = myresult[0][0]
+
             user_id = get_user(data_clean.author[i])
-
-            insert_comment(id_comment, str(data_clean.text[i]), user_id, video_id, data_clean.text_clean[i], data_clean.sentiment[i], data_clean.votes[i])
+            
+            insert_comment(id_comment, str(data_clean.text[i]), user_id, video_id, data_clean.text_clean[i], data_clean.sentiment[i], data_clean.votes[i], data_clean.language[i])
         
         query = """SELECT * from comments WHERE video_id = %s"""
         arg = (video_id,)
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
         
-        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes'])
+        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes', 'language'])
 
     return data_clean
