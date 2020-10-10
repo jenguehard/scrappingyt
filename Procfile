@@ -1,1 +1,1 @@
-web: sh setup.sh && streamlit run model/app_nodb.py
+web: sh setup.sh && streamlit run app_nodb.py
