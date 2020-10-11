@@ -22,7 +22,7 @@ from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 from langdetect import detect
 # import config
 # from func import main, nettoyage, topic_modeling, text_clustering, mysql_connect, insert_user, insert_comment, insert_video, get_data
-from mysql.connector import MySQLConnection, Error
+# from mysql.connector import MySQLConnection, Error
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import NMF, LatentDirichletAllocation, PCA
