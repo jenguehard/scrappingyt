@@ -28,6 +28,8 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import NMF, LatentDirichletAllocation, PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import homogeneity_score, silhouette_score
+from boto.s3.connection import S3Connection
+api_key = S3Connection(os.environ['api_key'], os.environ['api_key'])
 
 YOUTUBE_VIDEO_URL = 'https://www.youtube.com/watch?v={youtube_id}'
 YOUTUBE_COMMENTS_AJAX_URL_OLD = 'https://www.youtube.com/comment_ajax'
@@ -35,7 +37,6 @@ YOUTUBE_COMMENTS_AJAX_URL_NEW = 'https://www.youtube.com/comment_service_ajax'
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36'
 
-api_key= api_key
 youtube = build('youtube', 'v3', developerKey=api_key)
 
 def find_value(html, key, num_chars=2, separator='"'):
