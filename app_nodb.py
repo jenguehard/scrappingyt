@@ -28,8 +28,7 @@ from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import NMF, LatentDirichletAllocation, PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics import homogeneity_score, silhouette_score
-from boto.s3.connection import S3Connection
-api_key = S3Connection(os.environ['api_key'], os.environ['api_key'])
+api_key = 'AIzaSyCp7MrdYWUPpPqGtsbagZWNazq0aB4JanM'
 
 YOUTUBE_VIDEO_URL = 'https://www.youtube.com/watch?v={youtube_id}'
 YOUTUBE_COMMENTS_AJAX_URL_OLD = 'https://www.youtube.com/comment_ajax'
