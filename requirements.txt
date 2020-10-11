@@ -1,5 +1,4 @@
 requests==2.24.0
-boto==2.49.0
 streamlit==0.66.0
 wordcloud==1.8.0
 matplotlib==3.2.2
