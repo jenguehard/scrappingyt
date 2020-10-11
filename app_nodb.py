@@ -20,7 +20,7 @@ from lxml.cssselect import CSSSelector
 from transformers import pipeline
 from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 from langdetect import detect
-import config
+# import config
 # from func import main, nettoyage, topic_modeling, text_clustering, mysql_connect, insert_user, insert_comment, insert_video, get_data
 from mysql.connector import MySQLConnection, Error
 from googleapiclient.discovery import build
@@ -35,7 +35,7 @@ YOUTUBE_COMMENTS_AJAX_URL_NEW = 'https://www.youtube.com/comment_service_ajax'
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.130 Safari/537.36'
 
-api_key= config.api_key
+api_key= api_key
 youtube = build('youtube', 'v3', developerKey=api_key)
 
 def find_value(html, key, num_chars=2, separator='"'):
