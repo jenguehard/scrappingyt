@@ -18,9 +18,11 @@ import lxml.html
 import requests
 from lxml.cssselect import CSSSelector
 from transformers import pipeline
+from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
 import config
 from langdetect import detect
-from mysql.connector import MySQLConnection, Error
+import pymysql
+# from mysql.connector import MySQLConnection, Error
 from googleapiclient.discovery import build
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import NMF, LatentDirichletAllocation, PCA
@@ -52,7 +54,7 @@ def ajax_request(session, url, params=None, data=None, headers=None, retries=5, 
 
 
 def download_comments(youtube_id, sleep=.1):
-    if r'\"isLiveContent\":true' in requests.get(YOUTUBE_VIDEO_URL.format(youtube_id=youtube_id)).text:
+    if r'"isLiveContent":true' in requests.get(YOUTUBE_VIDEO_URL.format(youtube_id=youtube_id)).text:
         print('Live stream detected! Not all comments may be downloaded.')
         return download_comments_new_api(youtube_id, sleep)
     return download_comments_old_api(youtube_id, sleep)
@@ -66,8 +68,9 @@ def download_comments_new_api(youtube_id, sleep=1):
     response = session.get(YOUTUBE_VIDEO_URL.format(youtube_id=youtube_id))
     html = response.text
     session_token = find_value(html, 'XSRF_TOKEN', 3)
+    session_token = bytes(session_token, 'ascii').decode('unicode-escape')
 
-    data = json.loads(find_value(html, 'window["ytInitialData"] = ', 0, '\n').rstrip(';'))
+    data = json.loads(find_value(html, 'var ytInitialData = ', 0, '};') + '}')
     for renderer in search_dict(data, 'itemSectionRenderer'):
         ncd = next(search_dict(renderer, 'nextContinuationData'), None)
         if ncd:
@@ -84,7 +87,7 @@ def download_comments_new_api(youtube_id, sleep=1):
                                         'itct': itct},
                                 data={'session_token': session_token},
                                 headers={'X-YouTube-Client-Name': '1',
-                                         'X-YouTube-Client-Version': '2.20200207.03.01'})
+                                         'X-YouTube-Client-Version': '2.20201202.06.01'})
 
         if not response:
             break
@@ -140,6 +143,7 @@ def download_comments_old_api(youtube_id, sleep=1):
 
     page_token = find_value(html, 'data-token')
     session_token = find_value(html, 'XSRF_TOKEN', 3)
+    session_token = bytes(session_token, 'ascii').decode('unicode-escape')
 
     first_iteration = True
 
@@ -222,6 +226,195 @@ def extract_reply_cids(html):
     tree = lxml.html.fromstring(html)
     sel = CSSSelector('.comment-replies-header > .load-comments')
     return [i.get('data-cid') for i in sel(tree)]
+
+# def find_value(html, key, num_chars=2, separator='"'):
+#     pos_begin = html.find(key) + len(key) + num_chars
+#     pos_end = html.find(separator, pos_begin)
+#     return html[pos_begin: pos_end]
+
+
+# def ajax_request(session, url, params=None, data=None, headers=None, retries=5, sleep=20):
+#     for _ in range(retries):
+#         response = session.post(url, params=params, data=data, headers=headers)
+#         if response.status_code == 200:
+#             return response.json()
+#         if response.status_code in [403, 413]:
+#             return {}
+#         else:
+#             time.sleep(sleep)
+
+
+# def download_comments(youtube_id, sleep=.1):
+#     if r'\"isLiveContent\":true' in requests.get(YOUTUBE_VIDEO_URL.format(youtube_id=youtube_id)).text:
+#         print('Live stream detected! Not all comments may be downloaded.')
+#         return download_comments_new_api(youtube_id, sleep)
+#     return download_comments_old_api(youtube_id, sleep)
+
+
+# def download_comments_new_api(youtube_id, sleep=1):
+#     # Use the new youtube API to download some comments
+#     session = requests.Session()
+#     session.headers['User-Agent'] = USER_AGENT
+
+#     response = session.get(YOUTUBE_VIDEO_URL.format(youtube_id=youtube_id))
+#     html = response.text
+#     session_token = find_value(html, 'XSRF_TOKEN', 3)
+
+#     data = json.loads(find_value(html, 'window["ytInitialData"] = ', 0, '\n').rstrip(';'))
+#     for renderer in search_dict(data, 'itemSectionRenderer'):
+#         ncd = next(search_dict(renderer, 'nextContinuationData'), None)
+#         if ncd:
+#             break
+#     continuations = [(ncd['continuation'], ncd['clickTrackingParams'])]
+
+#     while continuations:
+#         continuation, itct = continuations.pop()
+#         response = ajax_request(session, YOUTUBE_COMMENTS_AJAX_URL_NEW,
+#                                 params={'action_get_comments': 1,
+#                                         'pbj': 1,
+#                                         'ctoken': continuation,
+#                                         'continuation': continuation,
+#                                         'itct': itct},
+#                                 data={'session_token': session_token},
+#                                 headers={'X-YouTube-Client-Name': '1',
+#                                          'X-YouTube-Client-Version': '2.20200207.03.01'})
+
+#         if not response:
+#             break
+#         if list(search_dict(response, 'externalErrorMessage')):
+#             raise RuntimeError('Error returned from server: ' + next(search_dict(response, 'externalErrorMessage')))
+
+#         # Ordering matters. The newest continuations should go first.
+#         continuations = [(ncd['continuation'], ncd['clickTrackingParams'])
+#                          for ncd in search_dict(response, 'nextContinuationData')] + continuations
+
+#         for comment in search_dict(response, 'commentRenderer'):
+#             yield {'cid': comment['commentId'],
+#                    'text': ''.join([c['text'] for c in comment['contentText']['runs']]),
+#                    'time': comment['publishedTimeText']['runs'][0]['text'],
+#                    'author': comment.get('authorText', {}).get('simpleText', ''),
+#                    'channel': comment['authorEndpoint']['browseEndpoint']['browseId'],
+#                    'votes': comment.get('voteCount', {}).get('simpleText', '0'),
+#                    'photo': comment['authorThumbnail']['thumbnails'][-1]['url'],
+#                    'heart': next(search_dict(comment, 'isHearted'), False)}
+
+#         time.sleep(sleep)
+
+
+# def search_dict(partial, key):
+#     if isinstance(partial, dict):
+#         for k, v in partial.items():
+#             if k == key:
+#                 yield v
+#             else:
+#                 for o in search_dict(v, key):
+#                     yield o
+#     elif isinstance(partial, list):
+#         for i in partial:
+#             for o in search_dict(i, key):
+#                 yield o
+
+
+# def download_comments_old_api(youtube_id, sleep=1):
+#     # Use the old youtube API to download all comments (does not work for live streams)
+#     session = requests.Session()
+#     session.headers['User-Agent'] = USER_AGENT
+
+#     # Get Youtube page with initial comments
+#     response = session.get(YOUTUBE_VIDEO_URL.format(youtube_id=youtube_id))
+#     html = response.text
+
+#     reply_cids = extract_reply_cids(html)
+
+#     ret_cids = []
+#     for comment in extract_comments(html):
+#         ret_cids.append(comment['cid'])
+#         yield comment
+
+#     page_token = find_value(html, 'data-token')
+#     session_token = find_value(html, 'XSRF_TOKEN', 3)
+
+#     first_iteration = True
+
+#     # Get remaining comments (the same as pressing the 'Show more' button)
+#     while page_token:
+#         data = {'video_id': youtube_id,
+#                 'session_token': session_token}
+
+#         params = {'action_load_comments': 1,
+#                   'order_by_time': True,
+#                   'filter': youtube_id}
+
+#         if first_iteration:
+#             params['order_menu'] = True
+#         else:
+#             data['page_token'] = page_token
+
+#         response = ajax_request(session, YOUTUBE_COMMENTS_AJAX_URL_OLD, params, data)
+#         if not response:
+#             break
+
+#         page_token, html = response.get('page_token', None), response['html_content']
+
+#         reply_cids += extract_reply_cids(html)
+#         for comment in extract_comments(html):
+#             if comment['cid'] not in ret_cids:
+#                 ret_cids.append(comment['cid'])
+#                 yield comment
+
+#         first_iteration = False
+#         time.sleep(sleep)
+
+#     # Get replies (the same as pressing the 'View all X replies' link)
+#     for cid in reply_cids:
+#         data = {'comment_id': cid,
+#                 'video_id': youtube_id,
+#                 'can_reply': 1,
+#                 'session_token': session_token}
+
+#         params = {'action_load_replies': 1,
+#                   'order_by_time': True,
+#                   'filter': youtube_id,
+#                   'tab': 'inbox'}
+
+#         response = ajax_request(session, YOUTUBE_COMMENTS_AJAX_URL_OLD, params, data)
+#         if not response:
+#             break
+
+#         html = response['html_content']
+
+#         for comment in extract_comments(html):
+#             if comment['cid'] not in ret_cids:
+#                 ret_cids.append(comment['cid'])
+#                 yield comment
+#         time.sleep(sleep)
+
+
+# def extract_comments(html):
+#     tree = lxml.html.fromstring(html)
+#     item_sel = CSSSelector('.comment-item')
+#     text_sel = CSSSelector('.comment-text-content')
+#     time_sel = CSSSelector('.time')
+#     author_sel = CSSSelector('.user-name')
+#     vote_sel = CSSSelector('.like-count.off')
+#     photo_sel = CSSSelector('.user-photo')
+#     heart_sel = CSSSelector('.creator-heart-background-hearted')
+
+#     for item in item_sel(tree):
+#         yield {'cid': item.get('data-cid'),
+#                'text': text_sel(item)[0].text_content(),
+#                'time': time_sel(item)[0].text_content().strip(),
+#                'author': author_sel(item)[0].text_content(),
+#                'channel': item[0].get('href').replace('/channel/','').strip(),
+#                'votes': vote_sel(item)[0].text_content() if len(vote_sel(item)) > 0 else 0,
+#                'photo': photo_sel(item)[0].get('src'),
+#                'heart': bool(heart_sel(item))}
+
+
+# def extract_reply_cids(html):
+#     tree = lxml.html.fromstring(html)
+#     sel = CSSSelector('.comment-replies-header > .load-comments')
+#     return [i.get('data-cid') for i in sel(tree)]
 
 
 def main(link):
@@ -394,16 +587,16 @@ def get_wordcloud(data_dict):
 # MySQL connection
 
 def mysql_connect():
-    import mysql.connector
+    # import mysql.connector
 
-    mydb = mysql.connector.connect(
+    mydb = pymysql.connect(
     host="localhost",
     user="jenguehard",
     password="Testsimplon_99",
     database="youtube"
     )
 
-    mycursor = mydb.cursor(buffered=True)
+    mycursor = mydb.cursor()
 
     # Table creation
 
@@ -461,7 +654,7 @@ def insert_video(video_id, link, key_words):
         mydb.commit()
         mycursor.close()
         mydb.close()
-    except Error as error:
+    except Exception as error:
         print(error)
 
 def insert_user(user_id, full_name):
@@ -475,7 +668,7 @@ def insert_user(user_id, full_name):
         mydb.commit()
         mycursor.close()
         mydb.close()
-    except Error as error:
+    except Exception as error:
         print(error)
 
 def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentiment, votes, language):
@@ -489,7 +682,7 @@ def insert_comment(comment_id, comment, user_id, video_id, comment_clean, sentim
         mydb.commit()
         mycursor.close()
         mydb.close()
-    except Error as error:
+    except Exception as error:
         print(error)
 
 def get_user(author):
@@ -503,7 +696,7 @@ def get_user(author):
         mydb.commit()
         mycursor.close()
         mydb.close()
-    except Error as error:
+    except Exception as error:
         st.write(error)
 
     myresult = mycursor.fetchall()
@@ -567,7 +760,7 @@ def get_data(youtube_link):
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
 
-        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes'])
+        data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes', 'language'])
 
     # Otherwise retrieve all the information from the video and insert it in the database.
 
@@ -615,7 +808,6 @@ def get_data(youtube_link):
         data_clean["text_clean"] = data_clean.text.apply(lambda x : nettoyage(x, language))
         
         data_author = data_clean.author.unique()
-        st.write(data_clean)
 
         try :
             req2 = youtube.videos().list(part='snippet,contentDetails', id=youtube_link.split("=")[1])
@@ -658,8 +850,6 @@ def get_data(youtube_link):
         result = mycursor.fetchall()
         num_rows = result[0][0]
 
-        st.write(data_clean.author)
-
         for i in range(data_clean.shape[0]):
             ### Get user id
 
@@ -684,7 +874,8 @@ def get_data(youtube_link):
         arg = (video_id,)
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
+        print(result)
         
         data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes', 'language'])
-
+        print(data_clean)
     return data_clean
