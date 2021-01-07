@@ -870,12 +870,12 @@ def get_data(youtube_link):
             
             insert_comment(id_comment, str(data_clean.text[i]), user_id, video_id, data_clean.text_clean[i], data_clean.sentiment[i], data_clean.votes[i], data_clean.language[i])
         
+        mydb, mycursor = mysql_connect()
+
         query = """SELECT * from comments WHERE video_id = %s"""
         arg = (video_id,)
         mycursor.execute(query, arg)
         result = mycursor.fetchall()
-        print(result)
         
         data_clean = pd.DataFrame(result, columns =['id', 'text', 'user_id', 'video_id', 'text_clean', 'sentiment', 'votes', 'language'])
-        print(data_clean)
     return data_clean
